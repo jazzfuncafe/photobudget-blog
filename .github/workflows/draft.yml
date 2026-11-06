@@ -9,6 +9,9 @@ on:
       slug:
         description: 'Тема из topics.json (пусто = следующая по очереди)'
         required: false
+      ping:
+        description: 'Только проверить сообщение в Телеграм (yes)'
+        required: false
 permissions:
   contents: write
   pull-requests: write
@@ -20,6 +23,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Проверка Телеграма
+        if: inputs.ping == 'yes'
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          code=$(curl -sS --retry 4 --retry-all-errors --retry-delay 5 -o resp.json -w '%{http_code}' "https://api.telegram.org/bot$(printf %s "$TG_TOKEN" | tr -d '[:space:]')/sendMessage" \
+            --data-urlencode "chat_id=$(printf %s "$TG_CHAT" | tr -d '[:space:]')" --data-urlencode "text=✅ Блог Фотобюджета: сообщения о черновиках будут приходить сюда.")
+          echo "HTTP $code"; jq -c '{ok, description}' resp.json || true
+          exit 0
       - name: Пропустить, если уже ждет одобрения другой черновик
         id: open
         env:
@@ -27,7 +40,7 @@ jobs:
         run: echo "count=$(gh pr list --state open --json number --jq length)" >> "$GITHUB_OUTPUT"
       - name: Написать черновик
         id: gen
-        if: steps.open.outputs.count == '0' || inputs.slug != ''
+        if: inputs.ping != 'yes' && (steps.open.outputs.count == '0' || inputs.slug != '')
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SLUG: ${{ inputs.slug }}
@@ -59,12 +72,13 @@ jobs:
           Одобрить: Merge pull request. Статья выйдет на https://budget.amamontov.site/blog/$slug/
           Не подходит: Close pull request или правки через Claude.")
           if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
-            curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
-              --data-urlencode "chat_id=$TG_CHAT" \
+            curl -sS --retry 4 --retry-all-errors --retry-delay 5 -o resp.json -w 'HTTP %{http_code}\n' "https://api.telegram.org/bot$(printf %s "$TG_TOKEN" | tr -d '[:space:]')/sendMessage" \
+              --data-urlencode "chat_id=$(printf %s "$TG_CHAT" | tr -d '[:space:]')" \
               --data-urlencode "text=📝 Черновик статьи для блога Фотобюджета: «$title»
 
           Прочитать: $read_url
           Одобрить: $pr (кнопка Merge pull request)
           Не подходит: там же Close или правки через Claude." \
-              --data-urlencode "disable_web_page_preview=true"
+              --data-urlencode "disable_web_page_preview=true" || echo "Телеграм не ответил, pull request все равно создан: $pr"
+            jq -c '{ok, description}' resp.json 2>/dev/null || true
           fi

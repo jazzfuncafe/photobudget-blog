@@ -30,7 +30,9 @@ function parse(file) {
   const raw = fs.readFileSync(file, 'utf8');
   const m = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!m) throw new Error(`${file}: нет шапки ---`);
-  const meta = Object.fromEntries(m[1].split('\n').filter(Boolean).map(l => { const i = l.indexOf(':'); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; }));
+  // Значения можно брать в кавычки (так GitHub показывает шапку без ошибок, если в заголовке есть двоеточие)
+  const val = v => (/^".*"$/.test(v) ? JSON.parse(v) : v);
+  const meta = Object.fromEntries(m[1].split('\n').filter(Boolean).map(l => { const i = l.indexOf(':'); return [l.slice(0, i).trim(), val(l.slice(i + 1).trim())]; }));
   for (const k of ['title', 'description', 'slug', 'date', 'topic']) if (!meta[k]) throw new Error(`${file}: нет поля ${k}`);
   meta.updated ||= meta.date;
   if (/[ёЁ]|—/.test(raw)) throw new Error(`${file}: есть «ё» или длинное тире`);
