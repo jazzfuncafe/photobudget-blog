@@ -97,5 +97,6 @@ for (let attempt = 0; attempt < 3; attempt++) {
 const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10); // день по Нячангу
 const file = path.join(ROOT, OUT, `${t.slug}.md`);
 fs.mkdirSync(path.dirname(file), { recursive: true });
-fs.writeFileSync(file, `---\ntitle: ${t.title}\ndescription: ${t.description}\nslug: ${t.slug}\ndate: ${today}\ntopic: ${t.topic}\n---\n${md}\n`);
+const q = JSON.stringify; // в кавычках: двоеточие в заголовке не ломает шапку
+fs.writeFileSync(file, `---\ntitle: ${q(t.title)}\ndescription: ${q(t.description)}\nslug: ${t.slug}\ndate: ${today}\ntopic: ${q(t.topic)}\n---\n${md}\n`);
 console.log(`OK ${path.relative(ROOT, file)} ${used} ${md.split(/\s+/).length} слов`);
