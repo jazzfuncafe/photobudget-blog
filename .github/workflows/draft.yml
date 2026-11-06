@@ -1,0 +1,70 @@
+# Раз в неделю: черновик статьи по следующей теме из topics.json → ветка + pull request + сообщение в Телеграм.
+# Одобрить = Merge pull request (статья сразу выходит на GitHub Pages). Отклонить = Close.
+name: Черновик статьи
+on:
+  schedule:
+    - cron: '0 2 * * 1'   # понедельник 09:00 по Нячангу
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Тема из topics.json (пусто = следующая по очереди)'
+        required: false
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Пропустить, если уже ждет одобрения другой черновик
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "count=$(gh pr list --state open --json number --jq length)" >> "$GITHUB_OUTPUT"
+      - name: Написать черновик
+        id: gen
+        if: steps.open.outputs.count == '0' || inputs.slug != ''
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SLUG: ${{ inputs.slug }}
+        run: |
+          out=$(node src/generate.mjs ${SLUG:+--slug=$SLUG})
+          echo "$out"
+          file=$(echo "$out" | awk '/^OK /{print $2}')
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Ветка, pull request и сообщение
+        if: steps.gen.outputs.file != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FILE: ${{ steps.gen.outputs.file }}
+        run: |
+          slug=$(basename "$FILE" .md)
+          title=$(sed -n 's/^title: //p' "$FILE")
+          git checkout -b "draft/$slug"
+          node src/build.mjs
+          git config user.name "photobudget-blog"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Черновик: $title"
+          git push -u origin "draft/$slug"
+          read_url="https://github.com/${GITHUB_REPOSITORY}/blob/draft/$slug/$FILE"
+          pr=$(gh pr create --base main --head "draft/$slug" --title "Черновик: $title" --body "Прочитать: $read_url
+
+          Одобрить: Merge pull request. Статья выйдет на https://budget.amamontov.site/blog/$slug/
+          Не подходит: Close pull request или правки через Claude.")
+          if [ -n "$TG_TOKEN" ] && [ -n "$TG_CHAT" ]; then
+            curl -s -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TG_CHAT" \
+              --data-urlencode "text=📝 Черновик статьи для блога Фотобюджета: «$title»
+
+          Прочитать: $read_url
+          Одобрить: $pr (кнопка Merge pull request)
+          Не подходит: там же Close или правки через Claude." \
+              --data-urlencode "disable_web_page_preview=true"
+          fi
